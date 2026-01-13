@@ -1,0 +1,217 @@
+#jenkins_setup-tasks-main.yml
+# 사용법
+# ansible-playbook -i hosts.ini install_Jenkins.yaml
+# firefox http://본인IP &
+
+---
+- name: "0. 시스템 기본 설정 및 도커 준비"
+  block:
+    - name: "0-1. SELinux를 Permissive 모드로 변경 (디버깅 및 마운트 원활화)"
+      ansible.posix.selinux:
+        policy: targeted
+        state: permissive
+      become: yes  # root 권한 필요
+      
+    # 0. 도커 서비스 기동
+    - name: "0-2. 도커 서비스 시작 및 활성화"
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+    
+    - name: "0-3. ACL 관리 도구 설치"
+      ansible.builtin.package:
+        name: acl
+        state: present
+  become: true
+
+# ==============================================================================
+# 1. 필수 디렉토리 생성 및 권한 부여
+# ==============================================================================
+# 1. 디렉토리 생성 및 권한 설정 (핵심: 젠킨스 UID 1000 적용)
+- name: "1. 필수 디렉토리 생성"
+  ansible.builtin.file:
+    path: "{{ item.path }}" # item은 loop문에 사용되는 변수입니다.
+    state: directory
+    owner: "1000"
+    group: "{{ target_gid }}"
+    mode: "{{ item.mode }}" # 2는 setgid 비트로 부모 디렉토리 그룹을 상속
+    recurse: yes
+  loop:
+    - { path: "{{ jenkins_home }}/casc_configs", mode: '2775' }
+    - { path: "{{ jenkins_home }}/init.groovy.d", mode: '2775' }
+    - { path: "{{ base_dir }}/logs", mode: '2775' } # 오류 log가 저장 될 폴더
+    - { path: "{{ git_dir }}", mode: '2775' } # git 폴더 미리 생성
+
+# ==============================================================================
+# 2. 키 관련 파트 (SSH & Security Hardening)
+# ==============================================================================
+- name: "2. Jenkins Deploy Key 권한 정립"
+  become: true
+  block:
+    - name: "2-1. Jenkins .ssh 디렉토리"
+      ansible.builtin.file:
+        path: "{{ jenkins_home }}/.ssh"
+        state: directory
+        owner: "1000"
+        group: "{{ target_gid }}"
+        mode: "0700"
+
+- name: "2-2. Jenkins deploy key 존재 확인"
+  ansible.builtin.stat:
+    path: "{{ jenkins_home }}/.ssh/jenkins_deploy"
+  register: jenkins_key
+
+- name: "Jenkins deploy key 없으면 생성(덮어쓰기 금지)"
+  become: true
+  ansible.builtin.command: >
+    ssh-keygen -t ed25519 -N "" -f {{ jenkins_home }}/.ssh/jenkins_deploy
+  args:
+    creates: "{{ jenkins_home }}/.ssh/jenkins_deploy"
+
+
+- name: "2-2-2. Jenkins deploy key 권한 설정(0600)"
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/.ssh/jenkins_deploy"
+    owner: "1000"
+    group: "{{ target_gid }}"
+    mode: "0600"
+    state: file
+
+# ==============================================================================
+# 3. 젠킨스 초기 기동 설정
+# ==============================================================================
+
+- name: "3. 젠킨스 초기 기동 설정"
+  block:
+    - name: "3-1. 토큰 생성용 Groovy 스크립트 배치"
+      ansible.builtin.template:
+        src: 'generate-token.groovy.j2'
+        dest: "{{ jenkins_home }}/init.groovy.d/generate-token.groovy"
+        owner: "1000"
+        mode: '0664'
+
+    - name: "3-2. 부팅 에러 방지용 초기 jenkins.yaml 배치"
+      ansible.builtin.copy:
+        content: "jenkins: {}" # 최소한의 데이터만 넣습니다.
+        dest: "{{ jenkins_home }}/casc_configs/jenkins.yaml"
+        owner: "1000"
+        mode: '0664'
+    - name: "3-3. 젠킨스 커스텀 이미지 빌드"
+      community.docker.docker_image:
+        name: "custom-jenkins"
+        tag: "latest"
+        build:
+          path: "/home/ansible-admin/project/Project04-CI-CD-collection/infra/infra/roles/jenkins_setup/files"
+          pull: yes
+        source: build
+        state: present
+      become: true
+
+    - name: "3-3. 젠킨스 컨테이너 실행"
+      community.docker.docker_container:
+        name: jenkins-server
+        image: custom-jenkins:latest
+        state: started
+        restart_policy: always
+        ports:
+          - "8080:8080"
+          - "50000:50000"
+        env:
+          CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yaml"
+          JENKINS_ADMIN_ID: "{{ admin_id }}"
+          JENKINS_ADMIN_PW: "{{ admin_pw }}"
+          JAVA_OPTS: "-Djenkins.install.runSetupWizard=false -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true"
+        volumes:
+          - "{{ jenkins_home }}:/var/jenkins_home:Z"
+          # [핵심] 호스트의 원본 경로를 컨테이너 내부 경로로 직접 매핑
+          - "/home/ansible-admin/project:/home/ansible-admin/project:Z"
+      become: true
+
+# ==============================================================================
+# 4. 최종 설정 업데이트
+# ==============================================================================
+- name: "4. 최종 설정 업데이트"
+  block:
+    - name: "4-1. 토큰 파일 생성 대기"
+      ansible.builtin.wait_for:
+        path: "{{ jenkins_home }}/api_token.txt"
+        timeout: 60
+
+    - name: "4-2. 토큰 값 변수 등록 (slurp)"
+      ansible.builtin.slurp:
+        src: "{{ jenkins_home }}/api_token.txt"
+      register: token_raw
+
+    - name: "4-3. 확보된 토큰을 포함하여 jenkins.yaml 배포"
+      ansible.builtin.template:
+        src: 'jenkins.yaml.j2'
+        dest: "{{ jenkins_home }}/casc_configs/jenkins.yaml"
+        owner: "1000"
+        mode: '0664'
+
+    - name: "4-4. 설정 반영을 위한 젠킨스 재시작"
+      community.docker.docker_container:
+        name: jenkins-server
+        state: started
+        restart: true
+  become: true
+
+# ==============================================================================
+# 5. Git 저징소 및 post-receive 설정
+# ==============================================================================
+- name: "5. Git 저장소 및 post-receive 설정"
+  block:
+    - name: "5-1. Git Bare 저장소 생성 및 초기화"
+      become: true
+      become_user: ansible-admin
+      ansible.builtin.shell: |
+        mkdir -p {{ git_dir }}
+        if [ ! -d "{{ git_dir }}/objects" ]; then
+          git init --bare --shared=group {{ git_dir }}
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: "5-2. Git 저장소 FACL 권한 부여 (표 기준 rwx 반영)"
+      ansible.posix.acl:
+        path: "{{ git_dir }}"
+        entity: "{{ item.id }}"
+        etype: "{{ item.type }}"
+        permissions: rwx # 표 기준: 코드 푸시 및 훅 실행을 위한 rwx 적용
+        state: present
+        recursive: yes
+        default: yes      # 향후 생성되는 커밋 파일에도 rwx 권한 자동 상속
+      loop:
+        - { id: "1000", type: "user" }          # 젠킨스 컨테이너 유저
+        - { id: "{{ target_gid }}", type: "group" } # 관리자 및 AI 서버 그룹
+
+    - name: "5-3. Git 저장소 공유 및 푸시 정책 설정"
+      ansible.builtin.shell: |
+        # 그룹 내 다른 사용자가 생성한 오브젝트에 접근 가능하도록 설정
+        git config --file {{ git_dir }}/config core.sharedRepository group
+        # 강제 푸시 허용 (CI/CD 파이프라인의 유연한 배포 목적)
+        git config --file {{ git_dir }}/config receive.denyNonFastForwards false
+
+    - name: "5-4. Git post-receive 훅 배포"
+      ansible.builtin.template:
+        src: "post-receive.j2"
+        dest: "{{ git_dir }}/hooks/post-receive"
+        owner: "1000"       # 젠킨스가 실행 주체이므로 1000 부여
+        group: "{{ target_gid }}"
+        mode: '0755'        # 실행 권한 필수
+  become: true
+
+- name: "6. 최종 결과 출력"
+  ansible.builtin.debug:
+    msg: 
+      - "🚀 젠킨스 자동화 세팅 완료!"
+      - "URL: http://{{ ansible_host }}:8080"
+      - "Job Name: {{ jenkins_job_name }}"
+      - "Token: {{ token_raw['content'] | b64decode }}"
+
+- name: "7. 보안을 위한 token 제거"
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/api_token.txt"
+    state: absent
+  become: true

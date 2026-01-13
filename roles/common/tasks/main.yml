@@ -1,0 +1,5 @@
+# roles/common/tasks/main.yml
+---
+- name: "시간 동기화 작업 실행"
+  ansible.builtin.import_tasks: sync_time.yaml  # 같은 tasks 폴더에 있는 파일을 호출
+  

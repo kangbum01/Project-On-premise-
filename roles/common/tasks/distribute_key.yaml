@@ -1,0 +1,14 @@
+# 실행 시 비밀번호 입력 옵션 추가
+# ansible-playbook -i ./hosts.ini ./distribute_key.yaml -k
+# -k 옵션은 입력한 비밀번호로 설정한 hosts들에 접근하기 때문에 비밀번호 통일이 필요하다
+---
+- name: share ssh key
+  hosts: AI_Server
+  gather_facts: no
+
+  tasks:
+  - name: Set my ssh key
+    ansible.posix.authorized_key:
+      user: ansible-admin
+      state: present
+      key: "{{ lookup('file', '/home/ansible-admin/.ssh/id_rsa.pub') }}"

@@ -1,0 +1,7 @@
+namespace: music_project
+name: infra
+version: 1.0.0
+authors:
+  - Kang Bum-seok
+description: Music Project Infrastructure Automation Collection
+license: MIT

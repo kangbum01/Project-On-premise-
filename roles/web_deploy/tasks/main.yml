@@ -1,0 +1,30 @@
+---
+- name: "1. 웹 서버 배포 환경 준비"
+  ansible.builtin.file:
+    path: "/home/ansible-admin/music_project"
+    state: directory
+    owner: "1000"
+    group: "{{ target_gid }}"
+    mode: '2755'
+  become: true
+
+- name: "2. 웹 콘텐츠 복사 (Jenkins Workspace -> Web Server)"
+  ansible.builtin.copy:
+    # 젠킨스 컨테이너의 호스트 마운트 경로를 참조합니다.
+    src: "{{ src_path | default('./web/') }}"
+    dest: "/tmp"
+    owner: 1000
+    group: "{{ target_gid }}"
+    mode: '0644'
+  become: true
+
+# ==============================================================================
+# [ HISTORY & TROUBLESHOOTING ]
+# ==============================================================================
+# 1. 경로 설정 주의사항
+#    - src 경로(/var/lib/jenkins/...)는 컨테이너 내부 경로이므로, 앤서블이 
+#      접근하기 위해서는 호스트에 마운트된 실제 경로를 사용해야 함.
+#
+# 2. 권한 설정
+#    - 디렉토리는 실행 권한(7)이 있어야 접근이 가능하므로 0755를 유지함.
+# ==============================================================================

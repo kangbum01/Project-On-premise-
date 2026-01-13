@@ -1,0 +1,38 @@
+import jenkins.model.*
+import hudson.model.*
+import jenkins.security.*
+
+// 1. 설정값 정의
+def adminId = "{{ admin_id }}"
+def tokenFilePath = "/var/jenkins_home/api_token.txt"
+def tokenName = "ansible-generated-token"
+
+// 2. 유저 객체 가져오기
+def user = User.get(adminId, true)
+
+if (user != null) {
+    // 3. API 토큰 속성 가져오기 (클래스 명시)
+    def apiTokenProperty = user.getProperty(ApiTokenProperty.class)
+    
+    // [중요] 기존에 생성된 토큰 파일이 없을 때만 새로 생성 (멱등성 유지)
+    def tokenFile = new File(tokenFilePath)
+    
+    if (!tokenFile.exists()) {
+        // 4. 신규 토큰 생성
+        def result = apiTokenProperty.tokenStore.generateNewToken(tokenName)
+        user.save()
+
+        // 5. 토큰 파일 쓰기 (plainValue를 저장해야 나중에 Ansible에서 쓸 수 있음)
+        tokenFile.text = result.plainValue
+        
+        // 보안을 위해 파일 권한 설정 (600 권한 효과)
+        tokenFile.setReadable(false, false)
+        tokenFile.setReadable(true, true) // 소유자만 읽기 가능
+        
+        println "SUCCESS: Token generated for ${adminId}"
+    } else {
+        println "SKIP: Token already exists at ${tokenFilePath}. No new token generated."
+    }
+} else {
+    println "FAILURE: User ${adminId} not found. Check if the user exists in Jenkins."
+}

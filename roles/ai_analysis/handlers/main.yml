@@ -1,0 +1,7 @@
+---
+- name: reload and restart medw-api
+  systemd:
+    name: medw-api
+    enabled: yes
+    state: restarted
+    daemon_reload: yes

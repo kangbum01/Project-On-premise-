@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# 앤서블 변수에서 자동으로 채워집니다.
+JENKINS_URL="http://{{ ansible_host }}:8080"
+USER_ID="{{ jenkins_admin_id }}"
+# slurp으로 읽어온 토큰 값을 바로 주입합니다.
+API_TOKEN="{{ token_raw['content'] | b64decode }}"
+
+JOB_NAME="{{ jenkins_job_name }}"
+
+echo "--- Git Push 감지: Jenkins 빌드를 트리거합니다 (Job: $JOB_NAME) ---"
+
+curl -X POST -u "${USER_ID}:${API_TOKEN}" \
+"${JENKINS_URL}/job/${JOB_NAME}/build?delay=0sec"
+
+if [ $? -eq 0 ]; then
+    echo "--- Jenkins 빌드 요청 성공! ---"
+else
+    echo "--- Jenkins 빌드 요청 실패... 네트워크나 토큰을 확인하세요 ---"
+fi

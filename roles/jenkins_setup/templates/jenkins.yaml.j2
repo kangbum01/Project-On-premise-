@@ -1,0 +1,78 @@
+# roles/jenkins_setup/templates/jenkins.yaml.j2
+jenkins:
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "{{ admin_id }}"
+          password: "{{ admin_pw }}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "ansible"
+            value: "/usr/bin/ansible-playbook"
+          - key: "PYTHONPATH"
+            value: "/var/jenkins_home/.local/lib/python3.9/site-packages"
+          - key: "ANSIBLE_HOST_KEY_CHECKING"
+            value: "False"
+
+unclassified:
+  location:
+    url: "http://{{ ansible_host }}:8080/"
+
+jobs:
+  - script: |
+      pipelineJob('{{ jenkins_job_name }}') {
+        // [1] 토큰도 일단은 가장 단순하게 처리
+        authenticationToken('{{ token_raw['content'] | b64decode | trim }}')
+        
+        definition {
+          cps {
+            script('''
+              pipeline {
+                agent any
+                stages {
+                  stage('Checkout') {
+                    steps {
+                      sh "git config --global --add safe.directory '*'"
+                      git branch: 'main', url: 'file://{{ git_dir }}'
+                    }
+                  }
+                  stage('Deploy to Web Server') {
+                    steps {
+                      sh """
+                      # 1. 앤서블 옵션들을 환경변수로 미리 정의 (가독성 향상)
+                      export ANSIBLE_HOST_KEY_CHECKING=False
+                      export ANSIBLE_INVENTORY="/home/ansible-admin/project/infra/infra/inventory/hosts.ini"
+                      export ANSIBLE_PRIVATE_KEY_FILE="/var/jenkins_home/.ssh/id_rsa"
+                      export ANSIBLE_SSH_ARGS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+                      
+                      # 2. 실행 명령어는 이제 딱 한 줄!
+                      set -o pipefail
+                      ansible-playbook /home/ansible-admin/project/infra/infra/web_deploy.yml \
+                        -e "src_path=${WORKSPACE}/web/" \
+                        | tee ansible_output.log
+                    """
+                    }
+                  }
+                }
+                post {
+                  success { echo '🎉 배포 성공!' }
+                  failure {
+                    // 변수 없이 고정 파일명으로 로그 복사
+                    sh "cp ansible_output.log {{ base_dir }}/logs/deploy_error.log"
+                  }
+                  always { 
+                    echo "빌드 완료"
+                  }
+                }
+              }
+            '''.stripIndent())
+            sandbox(true)
+          }
+        }
+      }

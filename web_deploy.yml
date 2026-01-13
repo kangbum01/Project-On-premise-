@@ -1,0 +1,6 @@
+---
+- name: "Web Server Deployment Playbook"
+  hosts: LB_Server  # inventory/hosts.ini에 적힌 그룹명
+  become: true
+  roles:
+    - web_deploy      # roles/web_deploy 폴더를 통째로 실행해라!

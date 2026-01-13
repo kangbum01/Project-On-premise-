@@ -1,0 +1,26 @@
+---
+- name: "All Time Sync(ex: KST)"
+  hosts: all
+  become: true
+  tasks:
+    - name: "1. Set timezone KST"
+      community.general.timezone:
+        name: Asia/Seoul
+
+    - name: "2. Install Chronyd"
+      ansible.builtin.yum:
+        name: chrony
+        state: present
+
+    - name: "3. Set time headquarters"
+      ansible.builtin.lineinfile:
+        path: /etc/chrony.conf
+        regexp: '^server 10\.4\.3\.10\b'
+        line: "server 10.4.3.10 iburst"
+        state: present
+
+    - name: "4. Restart service"
+      ansible.builtin.systemd:
+        name: chronyd
+        state: restarted
+        enabled: yes

@@ -1,0 +1,17 @@
+# group_vars/all.yml
+---
+# 유저 및 경로 설정
+ansible_user: ansible-admin
+base_dir: "/home/ansible-admin/project"
+git_dir: "{{ base_dir }}/git/music-project.git"
+
+# 권한 설정 변수
+jenkins_uid: "1000"
+target_gid: "1002"
+
+
+# 파이프라인 내부 변수
+ansible_bin_path: "/usr/bin/ansible-playbook"
+python_path: "/home/ansible-admin/.local/lib/python3.9/site-packages"
+
+
