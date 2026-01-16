@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+audio/*.mp3
+audio/*.wav
+ansible/*.retry

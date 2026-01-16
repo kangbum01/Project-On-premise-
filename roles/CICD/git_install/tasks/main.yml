@@ -1,20 +1,4 @@
-# ---
-# # [ Step 1 & 1.5: 환경 구축 및 권한 강제 설정 ]
-# - name: "1. AI 서버 권한 및 환경 준비"
-#   block:
-#     - name: "1-1. 프로젝트 폴더 소유권 강제 변경 (UID 1000 적용)"
-#       ansible.builtin.file:
-#         path: "{{ project_dir }}"
-#         owner: ansible-admin
-#         group: ansible-admin
-#         state: directory
-#         recurse: yes
-#       become: true
-
-#     - name: "1-2. AI 서버 기초 환경 설치 (setup_ai)"
-#       ansible.builtin.import_tasks: setup_ai.yml
-#       # 해당 태스크가 실행되지 않을 경우 ai와 git의 연결이 실행되지 않습니다.
-
+---
 # [ Step 2: Git 생성 및 AI 서버 연결 ]
 - name: "2. AI 서버와 로컬 Git 연결 실행"
   ansible.builtin.import_tasks: ai_connect_git.yml

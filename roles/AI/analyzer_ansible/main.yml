@@ -1,0 +1,88 @@
+---
+- name: Remote Deploy Music Analyzer API (CentOS 9)
+  hosts: analysis_node
+  become: yes
+  # vars: 섹션 제거 (group_vars/analysis_node.yml에서 불러옴)
+
+  tasks:
+    - name: 1. 시스템 저장소 준비 (CRB 및 EPEL)
+      dnf:
+        name:
+          - dnf-plugins-core
+          - epel-release
+        state: present
+
+    - name: 2. CRB 저장소 활성화 (CentOS 9 필수)
+      command: dnf config-manager --set-enabled crb
+      changed_when: false
+
+    - name: 3. RPM Fusion 저장소 설치 (FFmpeg 제공)
+      dnf:
+        name:
+          - https://mirrors.rpmfusion.org/free/el/rpmfusion-free-release-9.noarch.rpm
+          - https://mirrors.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-9.noarch.rpm
+        state: present
+        disable_gpg_check: yes
+
+    - name: 4. DNF 캐시 갱신 (저장소 인식 보장)
+      dnf:
+        update_cache: yes
+
+    - name: 5. 시스템 필수 패키지 설치
+      dnf:
+        name: "{{ system_packages }}" # group_vars에 정의된 리스트 사용
+        state: present
+
+    - name: 6. Python 패키지 설치 (CPU 최적화)
+      pip:
+        name: "{{ python_packages }}" # group_vars에 정의된 리스트 사용
+        extra_args: "--extra-index-url https://download.pytorch.org/whl/cpu"
+
+    - name: 7. 프로젝트 디렉토리 생성
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ ansible_user_id }}"
+        mode: '0755'
+      loop:
+        - "{{ analyzer_root }}"
+        - "{{ analyzer_root }}/src"
+        - "{{ analyzer_root }}/audio"
+        - "{{ web_static_path }}"
+
+    - name: 8. 소스 코드 전송 (Local -> Remote)
+      copy:
+        src: "{{ item }}"
+        dest: "{{ analyzer_root }}/src/"
+        owner: "{{ ansible_user_id }}"
+        mode: '0644'
+      loop:
+        - "{{ playbook_dir }}/../src/api.py"
+        - "{{ playbook_dir }}/../src/analyze.py"
+      notify: Restart Service # 코드 변경 시 서비스 재시작
+
+    - name: 9. Systemd 서비스 파일 배포
+      template:
+        src: templates/music_analyzer.service.j2
+        dest: /etc/systemd/system/music_analyzer.service
+      notify: Restart Service
+
+    - name: 10. 서비스 상시 가동 및 자동 실행 보장
+      systemd:
+        name: music_analyzer
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: 11. 방화벽 포트 오픈
+      firewalld:
+        port: "{{ api_port }}/tcp"
+        permanent: yes
+        state: enabled
+      ignore_errors: yes
+
+  handlers:
+    - name: Restart Service
+      systemd:
+        name: music_analyzer
+        state: restarted

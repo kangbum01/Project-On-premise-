@@ -37,14 +37,14 @@
   block:
     - name: "1-1. 홈 디렉토리 진입 권한 부여 (755)"
       ansible.builtin.file:
-        path: "{{ deploy_root }}"
+        path: "{{ ansible_admin_dir }}"
         state: directory
         mode: '0755'  # 외부 유저나 컨테이너가 이 폴더를 '통과'할 수 있게 함
 
     - name: "1-2. 프로젝트 폴더 소유권 및 권한 강제 설정 (777)"
       ansible.builtin.file:
         path: "{{ item }}"
-        owner: "{{ user_name }}"
+        owner: "{{ ansible_user }}"
         group: "{{ target_gid | default('1002') }}"
         state: directory
         # 2777: 777로 다 열되, 상위 그룹 권한을 하위 파일들이 그대로 이어받게 함(setgid)

@@ -1,0 +1,31 @@
+# group_vars/all.yml
+---
+# 유저 및 경로 설정
+ansible_user: ansible-admin
+ansible_admin_dir: "/home/ansible-admin"
+project_dir: "{{ ansible_admin_dir }}/project"
+git_dir: "{{ project_dir }}/git/music-project.git"
+
+# 권한 설정 변수
+jenkins_uid: "1000"
+target_gid: "1002"
+
+
+# 파이프라인 내부 변수
+ansible_bin_path: "/usr/bin/ansible-playbook"
+python_path: "/home/ansible-admin/.local/lib/python3.9/site-packages"
+
+# ai_connect_git에서 사용
+git_user_email: "teammate@music.project"
+git_server_ip: "10.4.3.10"
+
+# 젠킨스 관련 변수
+# 아이디, 비밀번호, 홈 폴더, 이름을 변경할 수 있습니다.
+# roles/jenkins_setup/vars/main.yml
+admin_id: "bumseok"
+admin_pw: "1234"
+jenkins_home: "/home/ansible-admin/jenkins_home"
+jenkins_job_name: "Music-Service-Deploy"
+
+# roles/jenkins_setup/vars/main.yml
+custom_jenkins_build_path: "/home/ansible-admin/project/Project04-CI-CD-collection/roles/jenkins_setup/files"

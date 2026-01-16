@@ -1,0 +1,134 @@
+---
+# ==========================================
+# 0. [공통] 네트워크 및 방화벽 긴급 복구
+# ==========================================
+- name: Fix Network Packet Filtering (Firewalld -> Iptables)
+  hosts: all
+  become: yes
+  vars:
+    trusted_network: "10.4.0.0/16"
+
+  tasks:
+    # ---------------------------------------------------------
+    # [순서 1] 인터넷이 살아있을 때 패키지부터 설치 (가장 중요!)
+    # ---------------------------------------------------------
+    - name: Install iptables-services
+      yum:
+        name: iptables-services
+        state: present
+
+    # ---------------------------------------------------------
+    # [순서 2] 기존 방화벽 제거
+    # ---------------------------------------------------------
+    - name: Stop and Disable Firewalld
+      service:
+        name: firewalld
+        state: stopped
+        enabled: no
+
+    - name: Mask Firewalld
+      systemd:
+        name: firewalld
+        masked: yes
+
+    - name: Flush nftables ruleset (Remove Firewalld Zombies)
+      shell: nft flush ruleset
+      ignore_errors: yes
+    
+    # ---------------------------------------------------------
+    # [순서 3] 방화벽 끄자마자 숨통(NAT) 틔워주기 (생명줄)
+    # ---------------------------------------------------------
+    - name: Temporary Enable NAT on LB immediately after flush
+      shell: iptables -t nat -A POSTROUTING -o ens160 -j MASQUERADE
+      when: "'lb' in group_names"
+      ignore_errors: yes
+
+    # ---------------------------------------------------------
+    # [순서 4] Iptables 서비스 시작 및 규칙 초기화
+    # ---------------------------------------------------------
+    - name: Start and Enable Iptables
+      service:
+        name: iptables
+        state: started
+        enabled: yes
+
+    - name: Flush existing iptables rules
+      iptables:
+        chain: "{{ item }}"
+        flush: yes
+      loop: [ 'INPUT', 'FORWARD', 'OUTPUT' ]
+
+    - name: Flush NAT table
+      iptables:
+        table: nat
+        chain: "{{ item }}"
+        flush: yes
+      loop: [ 'PREROUTING', 'POSTROUTING', 'OUTPUT' ]
+
+    # ---------------------------------------------------------
+    # [순서 5] 방화벽 규칙 주입 (공통 & LB전용)
+    # ---------------------------------------------------------
+    # [모든 서버 공통] 10.4 대역 접속 허용
+    - name: Allow INPUT from Internal Network
+      iptables:
+        chain: INPUT
+        source: "{{ trusted_network }}"
+        jump: ACCEPT
+        action: insert
+        rule_num: 1
+
+    # [LB 서버 전용] 포워딩 및 NAT 정식 설정
+    - block:
+        - name: Enable IPv4 Forwarding
+          ansible.posix.sysctl:
+            name: net.ipv4.ip_forward
+            value: '1'
+            sysctl_set: yes
+            state: present
+            reload: yes
+
+        - name: Allow FORWARD from Internal
+          ansible.builtin.iptables:
+            chain: FORWARD
+            source: "{{ trusted_network }}"
+            jump: ACCEPT
+            action: insert
+            rule_num: 1
+
+        - name: Allow FORWARD to Internal
+          ansible.builtin.iptables:
+            chain: FORWARD
+            destination: "{{ trusted_network }}"
+            jump: ACCEPT
+            action: insert
+            rule_num: 1
+
+        - name: Configure Masquerade (NAT)
+          ansible.builtin.iptables:
+            table: nat
+            chain: POSTROUTING
+            out_interface: "{{ ansible_default_ipv4.interface }}"
+            jump: MASQUERADE
+      when: "'lb' in group_names"
+
+    - name: Save iptables rules
+      shell: service iptables save
+
+# ==========================================
+# 1. 웹 서버 설정 (기존 코드)
+# ==========================================
+- name: Deploy Web Servers
+  hosts: web
+  become: yes
+  roles:
+    - frontend
+
+# ==========================================
+# 2. LB 서버 설정 (기존 코드)
+# ==========================================
+- name: Deploy LB Server
+  hosts: lb
+  become: yes
+  roles:
+    - backend_files
+    - loadbalancer

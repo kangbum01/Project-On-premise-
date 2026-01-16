@@ -1,0 +1,12 @@
+[Unit]
+Description=Blackbox Exporter
+After=network.target
+
+[Service]
+User=root
+# --config.file 옵션을 추가하여 경로를 지정합니다.
+ExecStart=/usr/local/bin/blackbox_exporter --config.file=/etc/prometheus/blackbox.yml
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

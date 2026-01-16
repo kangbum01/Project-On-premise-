@@ -38,7 +38,7 @@
   loop:
     - { path: "{{ jenkins_home }}/casc_configs", mode: "2775" }
     - { path: "{{ jenkins_home }}/init.groovy.d", mode: "2775" }
-    - { path: "{{ base_dir }}/logs", mode: "2775" }
+    - { path: "{{ project_dir }}/logs", mode: "2775" }
     - { path: "{{ git_dir }}", mode: "2775" }
 
 

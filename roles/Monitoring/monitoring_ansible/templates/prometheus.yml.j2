@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'medw-targets'
+    static_configs:
+      - targets:
+{% for host in groups['targets'] %}
+          - '{{ hostvars[host].ansible_host | default(host) }}:9100'
+{% endfor %}
+
+  - job_name: 'promtail'
+    static_configs:
+      - targets: ['localhost:9080']
+
+{% raw %}
+  - job_name: 'medw-web-uptime'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://172.16.6.82    # 로드밸런서 외부망
+          - http://10.4.2.11      # 웹서버 01 내부망
+          - http://10.4.2.12      # 웹서버 02 내부망
+          - http://10.4.2.13      # 웹서버 03 내부망
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:9115
+{% endraw %}

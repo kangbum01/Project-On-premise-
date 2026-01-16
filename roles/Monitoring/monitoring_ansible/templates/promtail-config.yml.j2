@@ -1,0 +1,38 @@
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://{{ monitoring_server_ip }}:3100/loki/api/v1/push
+
+scrape_configs:
+  # 1. 시스템 로그 파일 수집
+  - job_name: system_files
+    static_configs:
+    - targets: [localhost]
+      labels:
+        job: system_logs
+        host: {{ inventory_hostname }}
+        __path__: /var/log/messages
+
+  # 2. Nginx 웹 로그 수집
+  - job_name: nginx_logs
+    static_configs:
+    - targets: [localhost]
+      labels:
+        job: nginx_logs
+        host: {{ inventory_hostname }}
+        __path__: /var/log/nginx/*.log
+
+  # 3. Journalctl (systemd) 로그 수집 - 추가된 부분
+  - job_name: journal
+    journal:
+      max_age: 12h
+      labels:
+        job: systemd_journal
+        host: {{ inventory_hostname }}
+    relabel_configs:
+      - source_labels: ['__journal__systemd_unit']
+        target_label: 'unit'

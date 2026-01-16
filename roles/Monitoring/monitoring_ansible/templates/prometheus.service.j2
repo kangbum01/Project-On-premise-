@@ -1,0 +1,23 @@
+[Unit]
+Description=Prometheus Monitoring Server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+
+# 로그 파일 위치 수동 지정 없이 기본 storage 경로를 활용합니다.
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus/ \
+  --storage.tsdb.retention.time=15d \
+  --web.enable-lifecycle
+
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

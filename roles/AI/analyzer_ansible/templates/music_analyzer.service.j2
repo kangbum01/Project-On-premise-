@@ -1,0 +1,22 @@
+[Unit]
+Description=MRDW Music Analyzer API Service
+After=network.target
+
+[Service]
+User={{ ansible_user_id }}
+Group={{ ansible_user_id }}
+WorkingDirectory={{ analyzer_root }}/src
+# Ansible 변수를 환경 변수로 변환하여 Python에 주입
+Environment=PYTHONPATH={{ analyzer_root }}/src
+Environment=PYTHONUNBUFFERED=1
+Environment=ANALYZER_GIT_PATH={{ analyzer_root }}
+Environment=ANALYZER_NAS_PATH={{ nas_dir }}
+Environment=ANALYZER_LB_IP={{ load_balancer_ip }}
+Environment=ANALYZER_WEB_ROOT={{ web_root_path }}
+
+ExecStart={{ python_path }} -u {{ analyzer_root }}/src/api.py
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

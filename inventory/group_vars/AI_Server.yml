@@ -1,0 +1,31 @@
+---
+# 프로젝트 경로 설정
+analyzer_root: "/home/{{ ansible_user_id }}/music_analyzer"
+web_static_path: "/home/{{ ansible_user_id }}/project/web"
+nas_dir: "/mnt/NAS/result/"
+
+# 인프라 정보 
+load_balancer_ip: "10.4.2.10"  
+web_root_path: "/usr/share/nginx/html/music-project"
+
+# 실행 및 네트워크 설정
+api_port: 8000
+python_path: "/usr/bin/python3"
+
+# 설치 패키지 목록
+system_packages:
+  - dnf-plugins-core
+  - epel-release
+  - python3-pip
+  - ffmpeg
+  - libsndfile
+  - atlas-devel
+  - gcc-c++
+
+python_packages:
+  - torch
+  - fastapi
+  - uvicorn
+  - librosa
+  - python-multipart  
+  - "numpy<2.0"

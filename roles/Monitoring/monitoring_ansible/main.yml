@@ -1,0 +1,198 @@
+---
+- name: Setup Full Monitoring Stack (Server & Agents)
+  hosts: all
+  become: yes
+
+  vars:
+    node_exporter_ver: "1.7.0"
+    promtail_ver: "2.9.2"
+    prometheus_ver: "2.48.0"
+    loki_ver: "2.9.2"
+    grafana_ver: "10.2.2"
+    blackbox_exporter_ver: "0.24.0"
+
+    # 모니터링 중앙 서버 IP
+    monitoring_server_ip: "10.4.5.10"
+    admin_user: "ansible-admin"
+
+  tasks:
+    #####################################################################
+    # [공통] 시스템 유저 및 필수 패키지
+    #####################################################################
+    - name: Prometheus 시스템 유저 생성
+      user:
+        name: prometheus
+        system: yes
+        shell: /sbin/nologin
+
+    - name: 필수 패키지 설치
+      dnf:
+        name: [wget, tar, unzip, python3-libsemanage, net-tools]
+        state: present
+
+    #####################################################################
+    # [섹션 1] 에이전트 설치 (모든 호스트)
+    #####################################################################
+    - name: 에이전트 바이너리 다운로드 및 압축 해제
+      unarchive:
+        src: "https://github.com/{{ item.url }}"
+        dest: /tmp
+        remote_src: yes
+      loop:
+        - { url: "prometheus/node_exporter/releases/download/v{{ node_exporter_ver }}/node_exporter-{{ node_exporter_ver }}.linux-amd64.tar.gz" }
+        - { url: "grafana/loki/releases/download/v{{ promtail_ver }}/promtail-linux-amd64.zip" }
+
+    - name: 에이전트 바이너리 배치
+      copy:
+        src: "{{ item.src }}"
+        dest: "/usr/local/bin/{{ item.dest }}"
+        mode: '0755'
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        remote_src: yes
+      loop:
+        - { src: "/tmp/node_exporter-{{ node_exporter_ver }}.linux-amd64/node_exporter", dest: "node_exporter" }
+        - { src: "/tmp/promtail-linux-amd64", dest: "promtail" }
+
+    #####################################################################
+    # [섹션 2] 모니터링 서버 스택 (monitoring_server 전용)
+    # [섹션 2] 모니터링 서버 스택 (Grafana, Loki, Prometheus)
+    #####################################################################
+    - name: 모니터링 메인 스택 설치 블록
+      when: inventory_hostname in groups.get('monitoring_server', [])
+      block:
+        - name: Grafana RPM 설치
+          dnf:
+            name: "https://dl.grafana.com/oss/release/grafana-{{ grafana_ver }}-1.x86_64.rpm"
+            state: present
+            disable_gpg_check: yes
+
+        - name: 모니터링 디렉터리 생성
+          file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: /etc/prometheus, owner: root, group: root, mode: '0755' }
+            - { path: /var/lib/prometheus, owner: prometheus, group: prometheus, mode: '0755' }
+            - { path: /etc/grafana/provisioning/datasources, owner: root, group: root, mode: '0755' }
+
+        - name: Loki 및 Prometheus 다운로드
+            - { path: /var/lib/grafana/dashboards, owner: grafana, group: grafana, mode: '0755' }
+
+        - name: Loki 및 Prometheus 바이너리 다운로드 및 압축 해제
+          unarchive:
+            src: "https://github.com/{{ item.url }}"
+            dest: "/tmp"
+            remote_src: yes
+          loop:
+            - { url: "prometheus/prometheus/releases/download/v{{ prometheus_ver }}/prometheus-{{ prometheus_ver }}.linux-amd64.tar.gz" }
+            - { url: "grafana/loki/releases/download/v{{ loki_ver }}/loki-linux-amd64.zip" }
+
+        - name: 바이너리 이동
+        - name: Loki 및 Prometheus 바이너리 이름 변경 및 배치
+          copy:
+            src: "{{ item.src }}"
+            dest: "/usr/local/bin/{{ item.dest }}"
+            mode: '0755'
+            remote_src: yes
+          loop:
+            - { src: "/tmp/loki-linux-amd64", dest: "loki" }
+            - { src: "/tmp/prometheus-{{ prometheus_ver }}.linux-amd64/prometheus", dest: "prometheus" }
+            owner: "{{ item.owner | default(admin_user) }}"
+            group: "{{ item.group | default(admin_user) }}"
+            remote_src: yes
+          loop:
+            - { src: "/tmp/loki-linux-amd64", dest: "loki" }
+            - { src: "/tmp/prometheus-{{ prometheus_ver }}.linux-amd64/prometheus", dest: "prometheus", owner: "prometheus", group: "prometheus" }
+
+        - name: Grafana 데이터소스 설정
+          copy:
+            dest: "/etc/grafana/provisioning/datasources/ds_auto.yaml"
+            owner: root
+            group: grafana
+            content: |
+              apiVersion: 1
+              datasources:
+                - name: Prometheus
+                  type: prometheus
+                  url: http://localhost:9090
+                  isDefault: true
+                - name: Loki
+                  type: loki
+                  url: http://localhost:3100
+                  access: proxy
+
+        - name: Loki 기본 설정 파일 생성
+        - name: Loki 기본 설정 파일 다운로드
+          get_url:
+            url: "https://raw.githubusercontent.com/grafana/loki/v{{ loki_ver }}/cmd/loki/loki-local-config.yaml"
+            dest: /etc/loki-config.yaml
+
+    #####################################################################
+    # [섹션 3] 설정 파일 배포 (Templates)
+    #####################################################################
+    - name: 공통 에이전트 설정 배포
+    - name: 서비스 설정 및 Promtail 설정 배포
+      template:
+        src: "templates/{{ item.src }}"
+        dest: "{{ item.dest }}"
+      loop:
+        - { src: node_exporter.service.j2, dest: /etc/systemd/system/node_exporter.service }
+        - { src: promtail.service.j2, dest: /etc/systemd/system/promtail.service }
+        - { src: promtail-config.yml.j2, dest: /etc/promtail-config.yml }
+
+    - name: 모니터링 서버 전용 서비스 배포
+      template:
+        src: "templates/{{ item.src }}"
+        dest: "{{ item.dest }}"
+      loop:
+        - { src: prometheus.service.j2, dest: /etc/systemd/system/prometheus.service }
+        - { src: prometheus.yml.j2, dest: /etc/prometheus/prometheus.yml }
+        - { src: loki.service.j2, dest: /etc/systemd/system/loki.service }
+        - { src: blackbox_exporter.service.j2, dest: /etc/systemd/system/blackbox_exporter.service }
+      when: inventory_hostname in groups.get('monitoring_server', [])
+      when: inventory_hostname in groups.get('monitoring_server', []) or inventory_hostname == 'localhost'
+
+    #####################################################################
+    # [섹션 4] 실행 및 방화벽
+    #####################################################################
+    - name: 방화벽 포트 개방
+      firewalld:
+        port: "{{ item }}/tcp"
+        permanent: yes
+        state: enabled
+      loop: [9090, 3000, 3100, 9100, 9080]
+      notify: Reload Firewall
+
+    - name: 에이전트 서비스 시작 (모든 서버)
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+<<<<<<< HEAD
+      loop: [node_exporter, promtail]
+
+    - name: 메인 서버 서비스 시작 (monitoring_server 전용)
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+      loop: [prometheus, loki, grafana-server, blackbox_exporter]
+      when: inventory_hostname in groups.get('monitoring_server', [])
+=======
+      loop: [node_exporter, promtail, prometheus, loki, grafana-server]
+      when: >
+        (item in ['node_exporter', 'promtail']) or 
+        (inventory_hostname in groups.get('monitoring_server', []) or inventory_hostname == 'localhost')
+>>>>>>> 52549f7d88b7eca35d7aa3861afb48f5e3c00698
+
+  handlers:
+    - name: Reload Firewall
+      service:
+        name: firewalld
+        state: reloaded
