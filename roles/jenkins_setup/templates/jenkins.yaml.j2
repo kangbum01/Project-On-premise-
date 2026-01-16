@@ -14,9 +14,9 @@ jenkins:
     - envVars:
         env:
           - key: "ansible"
-            value: "/usr/bin/ansible-playbook"
+            value: "{{ ansible_bin_path }}"
           - key: "PYTHONPATH"
-            value: "/var/jenkins_home/.local/lib/python3.9/site-packages"
+            value: "{{ python_path }}"
           - key: "ANSIBLE_HOST_KEY_CHECKING"
             value: "False"
 
@@ -45,17 +45,16 @@ jobs:
                   stage('Deploy to Web Server') {
                     steps {
                       sh """
-                      # 1. 앤서블 옵션들을 환경변수로 미리 정의 (가독성 향상)
+                      REPO="/home/ansible-admin/project/Project04-CI-CD-collection"
+
                       export ANSIBLE_HOST_KEY_CHECKING=False
-                      export ANSIBLE_INVENTORY="/home/ansible-admin/project/infra/infra/inventory/hosts.ini"
-                      export ANSIBLE_PRIVATE_KEY_FILE="/var/jenkins_home/.ssh/id_rsa"
+                      export ANSIBLE_PRIVATE_KEY_FILE="/var/jenkins_home/.ssh/jenkins_deploy"
                       export ANSIBLE_SSH_ARGS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-                      
-                      # 2. 실행 명령어는 이제 딱 한 줄!
+
                       set -o pipefail
-                      ansible-playbook /home/ansible-admin/project/infra/infra/web_deploy.yml \
-                        -e "src_path=${WORKSPACE}/web/" \
-                        | tee ansible_output.log
+                      ansible-playbook -i "${REPO}/inventory/hosts.ini" "${REPO}/web_deploy.yml" \
+                      -e "src_path=${WORKSPACE}/web/" \
+                      | tee ansible_output.log
                     """
                     }
                   }

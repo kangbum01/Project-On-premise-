@@ -4,191 +4,255 @@
 # firefox http://본인IP &
 
 ---
-- name: "0. 시스템 기본 설정 및 도커 준비"
-  block:
-    - name: "0-1. SELinux를 Permissive 모드로 변경 (디버깅 및 마운트 원활화)"
-      ansible.posix.selinux:
-        policy: targeted
-        state: permissive
-      become: yes  # root 권한 필요
-      
-    # 0. 도커 서비스 기동
-    - name: "0-2. 도커 서비스 시작 및 활성화"
-      ansible.builtin.service:
-        name: docker
-        state: started
-        enabled: true
-    
-    - name: "0-3. ACL 관리 도구 설치"
-      ansible.builtin.package:
-        name: acl
-        state: present
-  become: true
 
-# ==============================================================================
-# 1. 필수 디렉토리 생성 및 권한 부여
-# ==============================================================================
-# 1. 디렉토리 생성 및 권한 설정 (핵심: 젠킨스 UID 1000 적용)
-- name: "1. 필수 디렉토리 생성"
+####################################################################
+# 0. 시스템 기본 설정
+####################################################################
+- name: "0-1. SELinux Permissive 설정 (컨테이너 마운트 안정화)"
+  ansible.posix.selinux:
+    policy: targeted
+    state: permissive
+
+- name: "0-2. Docker 서비스 시작 및 활성화"
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: "0-3. ACL 도구 설치 (Git repo 권한용)"
+  ansible.builtin.package:
+    name: acl
+    state: present
+
+####################################################################
+# 1. Jenkins 관련 디렉토리 준비 (UID 1000 기준)
+####################################################################
+- name: "1. Jenkins 필수 디렉토리 생성"
   ansible.builtin.file:
-    path: "{{ item.path }}" # item은 loop문에 사용되는 변수입니다.
+    path: "{{ item.path }}"
     state: directory
-    owner: "1000"
-    group: "{{ target_gid }}"
-    mode: "{{ item.mode }}" # 2는 setgid 비트로 부모 디렉토리 그룹을 상속
-    recurse: yes
+    owner: "{{ jenkins_uid }}" # 1000
+    group: "{{ target_gid }}"  # 1002
+    mode: "{{ item.mode }}"
+    recurse: no
   loop:
-    - { path: "{{ jenkins_home }}/casc_configs", mode: '2775' }
-    - { path: "{{ jenkins_home }}/init.groovy.d", mode: '2775' }
-    - { path: "{{ base_dir }}/logs", mode: '2775' } # 오류 log가 저장 될 폴더
-    - { path: "{{ git_dir }}", mode: '2775' } # git 폴더 미리 생성
+    - { path: "{{ jenkins_home }}/casc_configs", mode: "2775" }
+    - { path: "{{ jenkins_home }}/init.groovy.d", mode: "2775" }
+    - { path: "{{ base_dir }}/logs", mode: "2775" }
+    - { path: "{{ git_dir }}", mode: "2775" }
 
-# ==============================================================================
-# 2. 키 관련 파트 (SSH & Security Hardening)
-# ==============================================================================
-- name: "2. SSH 키 권한 정립 (FACL 활용)"
+
+####################################################################
+# 2. Jenkins Deploy Key 사전 검사 (키 생성/재발급은 절대 안 함)
+#    단, "권한/소유권 교정"은 자동으로 해준다 (내용은 안 건드림)
+####################################################################
+
+- name: "2-0. Jenkins deploy key 존재 여부 확인"
+  ansible.builtin.stat:
+    path: "{{ jenkins_home }}/.ssh/jenkins_deploy"
+  register: jenkins_key
+
+- name: "2-0b. Jenkins .ssh 디렉토리 존재 여부 확인"
+  ansible.builtin.stat:
+    path: "{{ jenkins_home }}/.ssh"
+  register: jenkins_ssh_dir
+
+- name: "2-1. Jenkins deploy key 없으면 중단(생성은 절대 안 함)"
+  ansible.builtin.fail:
+    msg: >
+      Jenkins deploy key가 없습니다.
+      이 playbook은 SSH 키를 생성/수정하지 않습니다.
+      사전에 {{ jenkins_home }}/.ssh/jenkins_deploy 키를 생성하고 LB 서버에 배포하세요.
+  when: not jenkins_key.stat.exists
+
+# ✅ 여기서부터는 "내용"이 아니라 "권한"만 교정(자동 복구)
+- name: "2-2. Jenkins home 루트 디렉토리 권한 보장"
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}"
+    state: directory
+    owner: "{{ jenkins_uid }}"
+    group: "{{ jenkins_uid }}"
+    mode: "2775"
+
+- name: "2-3. Jenkins deploy key 권한 교정(내용은 건드리지 않음)"
   block:
-    - name: "2-1. 호스트 SSH 폴더 및 키 권한 설정(0600)"
+    - name: ".ssh 디렉토리 권한(0700)"
       ansible.builtin.file:
-        path: "/home/ansible-admin/.ssh/{{ item.path }}"
-        owner: "1000"
-        group: "1000"
-        mode: "{{ item.mode }}"
-        state: "{{ item.state }}"
-      loop:
-        - { path: "", mode: "0700", state: "directory" }
-        - { path: "id_rsa", mode: "0600", state: "file" }
-  become: true
-  # - name: "2-2. Jenkins(1000)에게 SSH 키 읽기 권한만 부여"
-  #   ansible.posix.acl:
-  #     path: "/home/ansible-admin/.ssh/id_rsa"
-  #     entity: "1000"
-  #     etype: user
-  #     permissions: r
-  #     state: present
+        path: "{{ jenkins_home }}/.ssh"
+        state: directory
+        owner: "{{ jenkins_uid }}"
+        group: "{{ jenkins_uid }}"
+        mode: "0700"
+
+    - name: "jenkins_deploy 권한(0600)"
+      ansible.builtin.file:
+        path: "{{ jenkins_home }}/.ssh/jenkins_deploy"
+        state: file
+        owner: "{{ jenkins_uid }}"
+        group: "{{ jenkins_uid }}"
+        mode: "0600"
+
+    - name: "jenkins_deploy.pub 권한(0644)"
+      ansible.builtin.file:
+        path: "{{ jenkins_home }}/.ssh/jenkins_deploy.pub"
+        state: file
+        owner: "{{ jenkins_uid }}"
+        group: "{{ jenkins_uid }}"
+        mode: "0644"
+  when: jenkins_key.stat.exists
+
+# ✅ 교정 후 재검증(원인 추적용)
+- name: "2-4. (재검증) Jenkins deploy key stat"
+  ansible.builtin.stat:
+    path: "{{ jenkins_home }}/.ssh/jenkins_deploy"
+  register: jenkins_key_after
+
+- name: "2-4b. (재검증) Jenkins .ssh stat"
+  ansible.builtin.stat:
+    path: "{{ jenkins_home }}/.ssh"
+  register: jenkins_ssh_dir_after
+
+- name: "2-5. 최종 검증 실패 시 중단"
+  ansible.builtin.fail:
+    msg: |
+      Jenkins deploy key 권한/소유권 자동 교정 후에도 검증 실패.
+
+      - key exists: {{ jenkins_key_after.stat.exists }}
+      - key mode  : {{ jenkins_key_after.stat.mode | default('N/A') }}
+      - key uid   : {{ jenkins_key_after.stat.uid  | default('N/A') }}
+      - .ssh mode : {{ jenkins_ssh_dir_after.stat.mode | default('N/A') }}
+      - .ssh uid  : {{ jenkins_ssh_dir_after.stat.uid  | default('N/A') }}
+
+      기대값:
+      - {{ jenkins_home }}/.ssh                 : owner UID={{ jenkins_uid }}, mode=0700
+      - {{ jenkins_home }}/.ssh/jenkins_deploy  : owner UID={{ jenkins_uid }}, mode=0600
+  when: >
+    (not jenkins_key_after.stat.exists) or
+    (jenkins_key_after.stat.mode is defined and jenkins_key_after.stat.mode != "0600") or
+    (jenkins_key_after.stat.uid  is defined and (jenkins_key_after.stat.uid | string) != (jenkins_uid | string)) or
+    (jenkins_ssh_dir_after.stat.mode is defined and jenkins_ssh_dir_after.stat.mode != "0700") or
+    (jenkins_ssh_dir_after.stat.uid  is defined and (jenkins_ssh_dir_after.stat.uid | string) != (jenkins_uid | string))
+
+
 # ==============================================================================
 # 3. 젠킨스 초기 기동 설정
 # ==============================================================================
 
-- name: "3. 젠킨스 초기 기동 설정"
-  block:
-    - name: "3-1. 토큰 생성용 Groovy 스크립트 배치"
-      ansible.builtin.template:
-        src: 'generate-token.groovy.j2'
-        dest: "{{ jenkins_home }}/init.groovy.d/generate-token.groovy"
-        owner: "1000"
-        mode: '0664'
+# 3. Jenkins 초기 설정
+- name: "Groovy 토큰 생성 스크립트 배치"
+  template:
+    src: generate-token.groovy.j2
+    dest: "{{ jenkins_home }}/init.groovy.d/generate-token.groovy"
+    owner: "1000"
+    mode: "0664"
 
-    - name: "3-2. 부팅 에러 방지용 초기 jenkins.yaml 배치"
-      ansible.builtin.copy:
-        content: "jenkins: {}" # 최소한의 데이터만 넣습니다.
-        dest: "{{ jenkins_home }}/casc_configs/jenkins.yaml"
-        owner: "1000"
-        mode: '0664'
+- name: "임시 CasC 배치"
+  copy:
+    content: "jenkins: {}"
+    dest: "{{ jenkins_home }}/casc_configs/jenkins.yaml"
+    owner: "1000"
+    mode: "0664"
 
-    - name: "3-3. 젠킨스 컨테이너 실행"
-      community.docker.docker_container:
-        name: jenkins-server
-        image: custom-jenkins:latest
-        state: started
-        restart_policy: always
-        ports:
-          - "8080:8080"
-          - "50000:50000"
-        env:
-          CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yaml"
-          JENKINS_ADMIN_ID: "{{ admin_id }}"
-          JENKINS_ADMIN_PW: "{{ admin_pw }}"
-          JAVA_OPTS: "-Djenkins.install.runSetupWizard=false -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true"
-        volumes:
-          - "{{ jenkins_home }}:/var/jenkins_home:Z"
-          # [핵심] 호스트의 원본 경로를 컨테이너 내부 경로로 직접 매핑
-          - "/home/ansible-admin/.ssh/id_rsa:/var/jenkins_home/.ssh/id_rsa:ro,Z"
-          - "/home/ansible-admin/project:/home/ansible-admin/project:Z"
-      become: true
+- name: "Jenkins 커스텀 이미지 빌드 (custom-jenkins:latest)"
+  community.docker.docker_image:
+    name: custom-jenkins
+    tag: latest
+    source: build
+    build:
+      path: "{{ custom_jenkins_build_path }}"
+      pull: true
+  register: build_result
 
-# ==============================================================================
-# 4. 최종 설정 업데이트
-# ==============================================================================
-- name: "4. 최종 설정 업데이트"
-  block:
-    - name: "4-1. 토큰 파일 생성 대기"
-      ansible.builtin.wait_for:
-        path: "{{ jenkins_home }}/api_token.txt"
-        timeout: 60
+- name: "Jenkins 컨테이너 기동"
+  community.docker.docker_container:
+    name: jenkins-server
+    image: custom-jenkins:latest
+    state: started
+    restart_policy: always
+    ports:
+      - "8080:8080"
+    env:
+      CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yaml"
+      JENKINS_ADMIN_ID: "{{ admin_id }}"
+      JENKINS_ADMIN_PW: "{{ admin_pw }}"
+      JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+    volumes:
+      - "{{ jenkins_home }}:/var/jenkins_home:Z"
+      # - "/home/ansible-admin/project:/home/ansible-admin/project:Z"
 
-    - name: "4-2. 토큰 값 변수 등록 (slurp)"
-      ansible.builtin.slurp:
-        src: "{{ jenkins_home }}/api_token.txt"
-      register: token_raw
+- name: "API 토큰 생성 대기"
+  wait_for:
+    path: "{{ jenkins_home }}/api_token.txt"
+    timeout: 60
 
-    - name: "4-3. 확보된 토큰을 포함하여 jenkins.yaml 배포"
-      ansible.builtin.template:
-        src: 'jenkins.yaml.j2'
-        dest: "{{ jenkins_home }}/casc_configs/jenkins.yaml"
-        owner: "1000"
-        mode: '0664'
+- name: "API 토큰 slurp"
+  slurp:
+    src: "{{ jenkins_home }}/api_token.txt"
+  register: token_raw
 
-    - name: "4-4. 설정 반영을 위한 젠킨스 재시작"
-      community.docker.docker_container:
-        name: jenkins-server
-        state: started
-        restart: true
-  become: true
+- name: "최종 Jenkins CasC 반영"
+  template:
+    src: jenkins.yaml.j2
+    dest: "{{ jenkins_home }}/casc_configs/jenkins.yaml"
+    owner: "{{ jenkins_uid }}"
+    mode: "0664"
 
-# ==============================================================================
-# 5. Git 저징소 및 post-receive 설정
-# ==============================================================================
-- name: "5. Git 저장소 및 post-receive 설정"
-  block:
-    - name: "5-1. Git Bare 저장소 생성 및 초기화"
-      ansible.builtin.shell: |
-        mkdir -p {{ git_dir }}
-        if [ ! -d "{{ git_dir }}/objects" ]; then
-          git init --bare --shared=group {{ git_dir }}
-        fi
-      args:
-        executable: /bin/bash
+- name: "Jenkins 재시작"
+  community.docker.docker_container:
+    name: jenkins-server
+    state: started
+    restart: true
 
-    - name: "5-2. Git 저장소 FACL 권한 부여 (표 기준 rwx 반영)"
-      ansible.posix.acl:
-        path: "{{ git_dir }}"
-        entity: "{{ item.id }}"
-        etype: "{{ item.type }}"
-        permissions: rwx # 표 기준: 코드 푸시 및 훅 실행을 위한 rwx 적용
-        state: present
-        recursive: yes
-        default: yes      # 향후 생성되는 커밋 파일에도 rwx 권한 자동 상속
-      loop:
-        - { id: "1000", type: "user" }          # 젠킨스 컨테이너 유저
-        - { id: "{{ target_gid }}", type: "group" } # 관리자 및 AI 서버 그룹
+####################################################################
+# 5. Git Bare Repository 구성 (CI 트리거용)
+####################################################################
+- name: "5-1. Git Bare 저장소 초기화"
+  ansible.builtin.shell: |
+    mkdir -p {{ git_dir }}
+    if [ ! -d "{{ git_dir }}/objects" ]; then
+      git init --bare --shared=group {{ git_dir }}
+    fi
+  args:
+    executable: /bin/bash
 
-    - name: "5-3. Git 저장소 공유 및 푸시 정책 설정"
-      ansible.builtin.shell: |
-        # 그룹 내 다른 사용자가 생성한 오브젝트에 접근 가능하도록 설정
-        git config --file {{ git_dir }}/config core.sharedRepository group
-        # 강제 푸시 허용 (CI/CD 파이프라인의 유연한 배포 목적)
-        git config --file {{ git_dir }}/config receive.denyNonFastForwards false
+- name: "5-2. Git 저장소 ACL 설정"
+  ansible.posix.acl:
+    path: "{{ git_dir }}"
+    entity: "{{ item.id }}"
+    etype: "{{ item.type }}"
+    permissions: rwx
+    recursive: yes
+    default: yes
+    state: present
+  loop:
+    - { id: "1000", type: "user" }            # Jenkins
+    - { id: "{{ target_gid }}", type: "group" } # AI / 관리자 그룹
 
-    - name: "5-4. Git post-receive 훅 배포"
-      ansible.builtin.template:
-        src: "post-receive.j2"
-        dest: "{{ git_dir }}/hooks/post-receive"
-        owner: "1000"       # 젠킨스가 실행 주체이므로 1000 부여
-        group: "{{ target_gid }}"
-        mode: '0755'        # 실행 권한 필수
-  become: true
+- name: "5-3. Git 공유 정책 설정"
+  ansible.builtin.shell: |
+    git config --file {{ git_dir }}/config core.sharedRepository group
+    git config --file {{ git_dir }}/config receive.denyNonFastForwards false
 
-- name: "6. 최종 결과 출력"
+- name: "5-4. post-receive hook 배포"
+  ansible.builtin.template:
+    src: post-receive.j2
+    dest: "{{ git_dir }}/hooks/post-receive"
+    owner: "{{ jenkins_uid }}"
+    group: "{{ target_gid }}"
+    mode: "0755"
+
+
+####################################################################
+# 7. 결과 출력 및 민감 정보 정리
+####################################################################
+- name: "7-1. Jenkins 정보 출력"
   ansible.builtin.debug:
-    msg: 
-      - "🚀 젠킨스 자동화 세팅 완료!"
+    msg:
+      - "🚀 Jenkins CI/CD 서버 구축 완료"
       - "URL: http://{{ ansible_host }}:8080"
       - "Job Name: {{ jenkins_job_name }}"
-      - "Token: {{ token_raw['content'] | b64decode }}"
 
-- name: "7. 보안을 위한 token 제거"
+- name: "7-2. API 토큰 파일 제거"
   ansible.builtin.file:
     path: "{{ jenkins_home }}/api_token.txt"
     state: absent
-  become: true
