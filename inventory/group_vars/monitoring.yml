@@ -1,0 +1,12 @@
+---
+# inventory/group_vars/Monitoring.yml
+node_exporter_ver: "1.7.0"
+promtail_ver: "2.9.2"
+prometheus_ver: "2.48.0"
+loki_ver: "2.9.2"
+grafana_ver: "10.2.2"
+blackbox_exporter_ver: "0.24.0"
+
+# 모니터링 중앙 서버 IP
+monitoring_server_ip: "10.4.5.10"
+admin_user: "ansible-admin"

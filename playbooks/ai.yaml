@@ -3,4 +3,4 @@
   hosts: ai
   become: yes
   roles:
-    - 
+    - AI/analyzer_ansible

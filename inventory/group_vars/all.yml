@@ -1,3 +1,4 @@
+# 각 group_vars들의 이름과 인벤토리(hosts.ini)에서 설정한 그룹의 이름을 동일하게 맞추면 됨
 # group_vars/all.yml
 ---
 # 유저 및 경로 설정

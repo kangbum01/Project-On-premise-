@@ -1,3 +1,0 @@
----
-ansible_become_pass: your_password
-monitoring_server_ip: "10.4.5.10"

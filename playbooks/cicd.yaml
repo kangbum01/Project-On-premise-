@@ -67,11 +67,11 @@
   hosts: jenkins
   become: true
   roles:
-    - jenkins_setup
+    - CICD/jenkins_setup
 
 - name: "Step 3: Local Git 설치"
   hosts: jenkins
   become: true
   roles:
-    - git_install
+    - CICD/git_install
           

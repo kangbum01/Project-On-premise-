@@ -121,7 +121,7 @@
   hosts: web
   become: yes
   roles:
-    - frontend
+    - LB/Web-LB-Server/frontend
 
 # ==========================================
 # 2. LB 서버 설정 (기존 코드)
@@ -130,5 +130,5 @@
   hosts: lb
   become: yes
   roles:
-    - backend_files
-    - loadbalancer
+    - LB/Web-LB-Server/backend_files
+    - LB/Web-LB-Server/loadbalancer

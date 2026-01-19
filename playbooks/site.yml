@@ -1,10 +1,11 @@
 ---
 - import_playbook: sync_time.yaml
 - import_playbook: nas_db.yaml
-- import_playbook: cicd.yml
-- import_playbook: ai.yml
-- import_playbook: lb.yml
-- import_playbook: monitoring.yml
+- import_playbook: cicd.yaml
+- import_playbook: ai.yaml
+- import_playbook: lb.yaml
+# Monitoring 미완성
+#- import_playbook: monitoring.yml
 
 # ==============================================================================
 # [ HISTORY & TROUBLESHOOTING ]
